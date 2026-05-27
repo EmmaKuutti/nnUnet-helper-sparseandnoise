@@ -1,0 +1,43 @@
+{
+    "baseline_source": "C:/path/to/source_dataset", 
+    "raw_data_base": "C:/path/to/target_base", 
+    "nnunet_testresults_base": "C:/path/to/nnunet_testresults",
+    "testset_labels_dir": "C:/path/to/test_set/labelsTs",
+    "baseline_dataset_id": 1,
+    "baseline_dataset_name": "Baseline",
+    "sparse_sets": [
+        {
+            "dataset_id": 2,
+            "dataset_name": "n4_m1_axial",
+            "slice_step": 4,
+            "case_step": 1,
+            "axis": "axial"
+        },
+        {
+            "dataset_id": 3,
+            "dataset_name": "n8_m2_sagittal",
+            "slice_step": 8,
+            "case_step": 2,
+            "axis": "sagittal"
+        }
+        ,
+        {
+            "dataset_id": 5,
+            "dataset_name": "ax8_with_sag",
+            "slice_step": 8,
+            "case_step": 1,
+            "axis": "axial",
+            "secondary_axis": "sagittal",
+            "secondary_slice_step": 1
+        }
+    ],
+    "noisy_sets": [
+        {
+            "dataset_id": 4,
+            "dataset_name": "50percentnoise",
+            "noise_percent": 50,
+            "alpha": 5,
+            "sigma": 5
+        }
+    ]
+}
