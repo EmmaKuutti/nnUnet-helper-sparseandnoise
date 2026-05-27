@@ -56,10 +56,36 @@ class DatasetMaker:
             for f in sorted(src_dir.glob("*.nii.gz")):
                 shutil.copy(f, dst_dir / f.name)
 
-        shutil.copy(json_file, target_path / "dataset.json")
+        # Read original dataset.json, update dataset id/name and numTraining, then write
+        data = {}
+        with open(json_file, 'r') as jf:
+            try:
+                data = json.load(jf)
+            except Exception:
+                data = {}
+
+        # Ensure labels mapping exists
+        if "labels" not in data or not isinstance(data["labels"], dict):
+            data["labels"] = {"background": 0}
+
+        # Add or update identifying fields
+        folder_name = f"Dataset{int(dataset_id):03d}_{dataset_name}"
+        data["name"] = folder_name
+        try:
+            data["dataset_id"] = int(dataset_id)
+        except Exception:
+            data["dataset_id"] = dataset_id
+
+        # Count training images in the created folder
+        num_imgs = sum(1 for _ in (target_path / "imagesTr").glob("*.nii.gz"))
+        data["numTraining"] = num_imgs
+
+        with open(target_path / "dataset.json", 'w') as outj:
+            json.dump(data, outj, indent=4)
+
         return target_path
 
-    def make_sparse(self, source_dataset_dir=None, raw_data_base=None, slice_step=4, case_step=1, ignore_label=None, axis='axial', dataset_id=2, dataset_name=None):
+    def make_sparse(self, source_dataset_dir=None, raw_data_base=None, slice_step=4, case_step=1, ignore_label=None, axis='axial', secondary_axis=None, secondary_slice_step=1, dataset_id=2, dataset_name=None):
         """Create `nnUNet_raw/DatasetXXX_n...` where for every m-th case
         we keep every n-th slice along the chosen axis. Non-selected cases are filled with ignore_label.
 
@@ -67,6 +93,9 @@ class DatasetMaker:
         - slice_step: keep every `slice_step`-th slice (n)
         - case_step: process every `case_step`-th case (m)
         - ignore_label: label value used for ignored voxels
+        - axis: primary axis ('axial', 'coronal', or 'sagittal')
+        - secondary_axis: optional secondary axis for combined sparsification
+        - secondary_slice_step: slice step for secondary axis (default: 1)
         """
         source_dataset_dir = Path(source_dataset_dir or self.config.get("baseline_source"))
         raw_data_base = Path(raw_data_base or self.config.get("raw_data_base", "."))
@@ -87,6 +116,13 @@ class DatasetMaker:
         axis_map = {"axial": 2, "coronal": 1, "sagittal": 0}
         if axis not in axis_map:
             raise ValueError(f"Unknown axis '{axis}'. Choose from {list(axis_map.keys())}.")
+        
+        # Validate secondary axis if provided
+        if secondary_axis is not None:
+            secondary_axis = str(secondary_axis).lower()
+            if secondary_axis not in axis_map:
+                raise ValueError(f"Unknown secondary axis '{secondary_axis}'. Choose from {list(axis_map.keys())} or None.")
+        
         if dataset_name is None:
             dataset_name = f"n{slice_step}_m{case_step}_{axis}"
         target_path = self._make_dataset_root(raw_data_base, dataset_id, dataset_name)
@@ -104,10 +140,21 @@ class DatasetMaker:
                 except Exception:
                     original_json = {}
 
-        # Infer ignore label if not provided: max existing label + 1
+        # Infer ignore label if not provided: find max used integer label (including lists) + 1
         inferred_ignore = None
         if original_json.get("labels") and isinstance(original_json["labels"], dict):
-            int_vals = [v for v in original_json["labels"].values() if isinstance(v, int)]
+            int_vals = []
+            for v in original_json["labels"].values():
+                if isinstance(v, int):
+                    int_vals.append(v)
+                elif isinstance(v, (list, tuple)):
+                    for item in v:
+                        if isinstance(item, int):
+                            int_vals.append(item)
+                elif isinstance(v, dict):
+                    for item in v.values():
+                        if isinstance(item, int):
+                            int_vals.append(item)
             max_label = max(int_vals) if int_vals else 0
             inferred_ignore = max_label + 1
         if ignore_label is None:
@@ -129,6 +176,14 @@ class DatasetMaker:
                 sel_slices[ax] = slice(None, None, slice_step)
                 sel_slices = tuple(sel_slices)
                 sparse_data[sel_slices] = data[sel_slices]
+                
+                # Apply secondary axis slicing if provided
+                if secondary_axis is not None:
+                    secondary_ax = axis_map[secondary_axis]
+                    sel_slices_2 = [slice(None), slice(None), slice(None)]
+                    sel_slices_2[secondary_ax] = slice(None, None, secondary_slice_step)
+                    sel_slices_2 = tuple(sel_slices_2)
+                    sparse_data[sel_slices_2] = data[sel_slices_2]
 
             new_img = nib.Nifti1Image(sparse_data, label_img.affine, label_img.header)
             nib.save(new_img, target_path / "labelsTr" / label_file.name)
@@ -139,19 +194,33 @@ class DatasetMaker:
             if src_img.exists():
                 shutil.copy(src_img, target_path / "imagesTr" / img_name)
 
-        # Copy and adapt dataset.json: preserve original style, add ignore label
+        # Copy and adapt dataset.json: preserve original style, add ignore label, and set name/id
         if json_file.exists():
             with open(json_file, 'r') as jf:
                 try:
                     data = json.load(jf)
                 except Exception:
                     data = {}
+
             # Ensure labels mapping exists
             if "labels" not in data or not isinstance(data["labels"], dict):
                 data["labels"] = {"background": 0}
+
             # Add ignore label entry
             data["labels"]["ignore"] = int(ignore_label_value)
-            # Preserve any existing region ordering or other keys
+
+            # Add/update identifying fields
+            folder_name = f"Dataset{int(dataset_id):03d}_{dataset_name}"
+            data["name"] = folder_name
+            try:
+                data["dataset_id"] = int(dataset_id)
+            except Exception:
+                data["dataset_id"] = dataset_id
+
+            # numTraining should reflect total cases
+            total_cases = len(label_files)
+            data["numTraining"] = total_cases
+
             with open(target_path / "dataset.json", 'w') as outj:
                 json.dump(data, outj, indent=4)
 
@@ -233,12 +302,25 @@ class DatasetMaker:
                     data = json.load(jf)
                 except Exception:
                     data = {}
-            if 'numTraining' in data:
-                data['numTraining'] = total_cases
+
+            if 'labels' not in data or not isinstance(data['labels'], dict):
+                data['labels'] = {'background': 0}
+
+            # Update numTraining to actual number of cases
+            data['numTraining'] = total_cases
+
+            # Add ignore label if requested
             if ignore_label is not None:
-                if 'labels' not in data or not isinstance(data['labels'], dict):
-                    data['labels'] = {'background': 0}
                 data['labels']['ignore'] = int(ignore_label)
+
+            # Add/update identifying fields
+            folder_name = f"Dataset{int(dataset_id):03d}_{dataset_name}"
+            data['name'] = folder_name
+            try:
+                data['dataset_id'] = int(dataset_id)
+            except Exception:
+                data['dataset_id'] = dataset_id
+
             with open(target_path / 'dataset.json', 'w') as outj:
                 json.dump(data, outj, indent=4)
 
