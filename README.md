@@ -16,6 +16,8 @@ Quick flags for `datasetit.py` (one-off runs):
 - `--slice-step N` : keep every Nth slice (default 4)
 - `--case-step M` : process every Mth case (default 1 (all))
 - `--axis {axial,coronal,sagittal}` : axis to sparsify (default axial)
+- `--secondary-axis {axial,coronal,sagittal}` : optional second axis for combined sparsification
+- `--secondary-slice-step N` : slice step for the secondary axis (default 1)
 - `--make-noisy` : generate one noisy dataset
 - `--noise-percent P` : percent of cases to add noise to (default from config)
 
@@ -23,7 +25,7 @@ Configuration (`configuration.json`) features for `datasetit.py`
 - `baseline_source`: path to source folder with `imagesTr`, `labelsTr`, `dataset.json`.
 - `raw_data_base`: base folder where `nnUNet_raw` will be created.
 - `baseline_dataset_id` / `baseline_dataset_name`: ID and name for baseline dataset.
-- `sparse_sets`: array of objects defining multiple sparse datasets. Each entry must include `dataset_id` and may include `dataset_name`, `slice_step`, `case_step`, `axis`, and `ignore_label`.
+- `sparse_sets`: array of objects defining multiple sparse datasets. Each entry must include `dataset_id` and may include `dataset_name`, `slice_step`, `case_step`, `axis`, `secondary_axis`, `secondary_slice_step`, and `ignore_label`. When `secondary_axis` is provided, a second slicing pass is applied along that axis.
 - `noisy_sets`: array of objects defining multiple noisy datasets. Each entry must include `dataset_id` and may include `dataset_name`, `noise_percent`, `alpha`, `sigma`, and `ignore_label`.
 
 Example `configuration.json` for `datasetit.py`
