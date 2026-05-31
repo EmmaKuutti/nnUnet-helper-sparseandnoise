@@ -80,6 +80,15 @@ Usage for `results.py`
 py -3 "results.py"
 ```
 
+- Or with a custom configuration file:
+
+```powershell
+py -3 "results.py" --conf "C:\path\to\configuration.json"
+```
+
+Quick flags for `results.py`:
+- `--conf <path>` or `--config <path>` : path to configuration.json (default: configuration.json in current directory)
+
 Configuration needed for `results.py`
 - `nnunet_testresults_base`: base folder where predicted nnU-Net result folders live.
 - `testset_labels_dir`: path to ground truth test labels for evaluation.

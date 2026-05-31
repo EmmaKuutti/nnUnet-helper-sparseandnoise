@@ -1,6 +1,7 @@
 import csv
 import os
 import json
+import argparse
 import numpy as np
 import SimpleITK as sitk
 from medpy.metric.binary import hd95, dc
@@ -30,14 +31,22 @@ def get_dataset_list(cfg):
 
 
 def read_labels_from_dataset_json(raw_data_base, dataset_id, dataset_name):
-    dataset_json_path = os.path.join(raw_data_base, "nnUNet_raw", f"Dataset{dataset_id}_{dataset_name}", "dataset.json")
+    dataset_json_path = os.path.join(raw_data_base, "nnUNet_raw", f"Dataset{dataset_id:03d}_{dataset_name}", "dataset.json")
     if os.path.exists(dataset_json_path):
         with open(dataset_json_path, "r", encoding="utf-8") as f:
             dj = json.load(f)
         labels = dj.get("labels", {})
-        # keys might be strings; convert to ints excluding background 0
-        mapping = {int(k): v for k, v in labels.items() if int(k) != 0}
-        return mapping
+        # Build mapping: try to convert keys to ints, skip non-numeric keys (e.g., "background")
+        mapping = {}
+        for k, v in labels.items():
+            try:
+                key_int = int(k)
+                if key_int != 0:
+                    mapping[key_int] = v
+            except (ValueError, TypeError):
+                # Skip non-numeric keys (e.g., "background", "ignore", etc.)
+                pass
+        return mapping if mapping else None
     return None
 
 
@@ -144,7 +153,7 @@ def main(config_path="configuration.json"):
     for ds in datasets:
         did = ds["id"]
         dname = ds["name"]
-        pred_dir = os.path.join(pred_base, f"Dataset{did}_{dname}")
+        pred_dir = os.path.join(pred_base, f"Dataset{did:03d}_{dname}")
         if not os.path.isdir(pred_dir):
             print(f"Prediction directory missing: {pred_dir}; skipping dataset {did}")
             continue
@@ -153,7 +162,7 @@ def main(config_path="configuration.json"):
         classes = read_labels_from_dataset_json(raw_base, did, dname)
         if classes is None or len(classes) == 0:
             # fallback: infer classes from ground truth files (union of labels excluding 0)
-            print(f"No dataset.json found for Dataset{did}_{dname}, inferring classes from ground truth files...")
+            print(f"No dataset.json found for Dataset{did:03d}_{dname}, inferring classes from ground truth files...")
             classes = {}
             for f in sorted(os.listdir(gt_dir)):
                 if not f.endswith('.nii.gz'):
@@ -165,7 +174,7 @@ def main(config_path="configuration.json"):
                         continue
                     classes.setdefault(int(u), f"Class_{int(u)}")
 
-        print(f"Evaluating Dataset{did}_{dname} with classes: {classes}")
+        print(f"Evaluating Dataset{did:03d}_{dname} with classes: {classes}")
         summary = evaluate_dataset(pred_dir, gt_dir, classes)
 
         out = {
@@ -174,11 +183,11 @@ def main(config_path="configuration.json"):
             "summary": summary
         }
 
-        out_name = os.path.join(pred_dir, f"results_Dataset{did}_{dname}.json")
+        out_name = os.path.join(pred_dir, f"results_Dataset{did:03d}_{dname}.json")
         with open(out_name, "w", encoding="utf-8") as f:
             json.dump(out, f, indent=2)
 
-        csv_name = os.path.join(pred_dir, f"results_Dataset{did}_{dname}.csv")
+        csv_name = os.path.join(pred_dir, f"results_Dataset{did:03d}_{dname}.csv")
         write_csv_summary(csv_name, did, dname, summary)
 
         print(f"Wrote results to {out_name}")
@@ -186,4 +195,13 @@ def main(config_path="configuration.json"):
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Evaluate nnU-Net predictions and compute metrics")
+    parser.add_argument(
+        "--conf",
+        "--config",
+        dest="config_path",
+        default="configuration.json",
+        help="Path to configuration.json (default: configuration.json)"
+    )
+    args = parser.parse_args()
+    main(config_path=args.config_path)
