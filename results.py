@@ -52,7 +52,7 @@ def read_labels_from_dataset_json(raw_data_base, dataset_id, dataset_name):
 
 def evaluate_dataset(pred_dir, gt_dir, classes_mapping):
     # classes_mapping: {class_id: name}
-    class_scores = {cid: {"dice": [], "hd95": []} for cid in classes_mapping.keys()}
+    class_scores = {cid: {"dice": [], "hd95": [], "precision": [], "recall": [], "volumetric_ratio": []} for cid in classes_mapping.keys()}
 
     files = sorted([f for f in os.listdir(pred_dir) if f.endswith(".nii.gz")])
     for fname in files:
@@ -83,7 +83,20 @@ def evaluate_dataset(pred_dir, gt_dir, classes_mapping):
             except Exception:
                 dice_score = 0.0
 
+            tp = int(np.logical_and(pred_bin, gt_bin).sum())
+            fp = int(np.logical_and(pred_bin, np.logical_not(gt_bin)).sum())
+            fn = int(np.logical_and(np.logical_not(pred_bin), gt_bin).sum())
+            gt_volume = int(gt_bin.sum())
+            pred_volume = int(pred_bin.sum())
+
+            precision_score = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+            recall_score = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+            volumetric_ratio = float(pred_volume / gt_volume) if gt_volume > 0 else None
+
             class_scores[cid]["dice"].append({"case": fname, "value": dice_score})
+            class_scores[cid]["precision"].append({"case": fname, "value": precision_score})
+            class_scores[cid]["recall"].append({"case": fname, "value": recall_score})
+            class_scores[cid]["volumetric_ratio"].append({"case": fname, "value": volumetric_ratio})
 
             # HD95: if pred empty -> treat as undefined (store null)
             if not np.any(pred_bin):
@@ -99,6 +112,9 @@ def evaluate_dataset(pred_dir, gt_dir, classes_mapping):
     summary = {}
     for cid, cname in classes_mapping.items():
         dices = [c["value"] for c in class_scores[cid]["dice"]]
+        precisions = [c["value"] for c in class_scores[cid]["precision"]]
+        recalls = [c["value"] for c in class_scores[cid]["recall"]]
+        volumetric_ratios = [c["value"] for c in class_scores[cid]["volumetric_ratio"] if c["value"] is not None]
         hd95s = [c["value"] for c in class_scores[cid]["hd95"] if c["value"] is not None]
 
         summary[cid] = {
@@ -106,10 +122,19 @@ def evaluate_dataset(pred_dir, gt_dir, classes_mapping):
             "cases_evaluated": len(dices),
             "mean_dice": float(np.mean(dices)) if dices else None,
             "median_dice": float(np.median(dices)) if dices else None,
+            "mean_precision": float(np.mean(precisions)) if precisions else None,
+            "median_precision": float(np.median(precisions)) if precisions else None,
+            "mean_recall": float(np.mean(recalls)) if recalls else None,
+            "median_recall": float(np.median(recalls)) if recalls else None,
+            "mean_volumetric_ratio": float(np.mean(volumetric_ratios)) if volumetric_ratios else None,
+            "median_volumetric_ratio": float(np.median(volumetric_ratios)) if volumetric_ratios else None,
             "mean_hd95": float(np.mean(hd95s)) if hd95s else None,
             "median_hd95": float(np.median(hd95s)) if hd95s else None,
             "per_case": {
                 "dice": class_scores[cid]["dice"],
+                "precision": class_scores[cid]["precision"],
+                "recall": class_scores[cid]["recall"],
+                "volumetric_ratio": class_scores[cid]["volumetric_ratio"],
                 "hd95": class_scores[cid]["hd95"]
             }
         }
@@ -120,7 +145,7 @@ def evaluate_dataset(pred_dir, gt_dir, classes_mapping):
 def write_csv_summary(output_csv_path, dataset_id, dataset_name, summary):
     with open(output_csv_path, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(["dataset_id", "dataset_name", "class_id", "class_name", "cases_evaluated", "mean_dice", "median_dice", "mean_hd95", "median_hd95"])
+        writer.writerow(["dataset_id", "dataset_name", "class_id", "class_name", "cases_evaluated", "mean_dice", "median_dice", "mean_precision", "median_precision", "mean_recall", "median_recall", "mean_volumetric_ratio", "median_volumetric_ratio", "mean_hd95", "median_hd95"])
         for cid, info in summary.items():
             writer.writerow([
                 dataset_id,
@@ -130,6 +155,12 @@ def write_csv_summary(output_csv_path, dataset_id, dataset_name, summary):
                 info.get("cases_evaluated"),
                 info.get("mean_dice"),
                 info.get("median_dice"),
+                info.get("mean_precision"),
+                info.get("median_precision"),
+                info.get("mean_recall"),
+                info.get("median_recall"),
+                info.get("mean_volumetric_ratio"),
+                info.get("median_volumetric_ratio"),
                 info.get("mean_hd95"),
                 info.get("median_hd95"),
             ])

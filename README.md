@@ -104,9 +104,10 @@ Example `configuration.json` additions for `results.py`
 ```
 
 Evaluation output from `results.py`
-- For each configured dataset, it computes per-class Dice and HD95.
+- For each configured dataset, it computes per-class Dice, Precision, Recall, Volumetric Ratio, and HD95.
 - Writes `results_Dataset{ID}_{Name}.json` in the prediction folder.
 - Writes `results_Dataset{ID}_{Name}.csv` next to the JSON file.
+- The JSON summary includes mean/median values and per-case metrics for all computed scores.
 
 Notes
 - `datasetit.py` copies images unchanged and sparsifies or warps labels depending on the operation.
