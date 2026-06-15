@@ -24,6 +24,31 @@ class DatasetMaker:
         dataset_path.mkdir(parents=True, exist_ok=True)
         return dataset_path
 
+    def _infer_ignore_label_from_labels(self, labels):
+        """Infer the next available ignore label from a labels mapping.
+
+        This supports nested regional label definitions and returns the
+        highest used integer plus one.
+        """
+        used_values = set()
+
+        def collect_values(value):
+            if isinstance(value, bool):
+                return
+            if isinstance(value, int):
+                used_values.add(value)
+            elif isinstance(value, dict):
+                for v in value.values():
+                    collect_values(v)
+            elif isinstance(value, (list, tuple, set)):
+                for item in value:
+                    collect_values(item)
+
+        collect_values(labels)
+        if not used_values:
+            return 1
+        return max(used_values) + 1
+
     def make_baseline(self, source_dataset_dir=None, raw_data_base=None, dataset_id=1, dataset_name="Baseline"):
         """Create `nnUNet_raw` under `raw_data_base`, then copy the provided
         dataset into `nnUNet_raw/Dataset001_Baseline`.
@@ -140,23 +165,10 @@ class DatasetMaker:
                 except Exception:
                     original_json = {}
 
-        # Infer ignore label if not provided: find max used integer label (including lists) + 1
+        # Infer ignore label if not provided: use the highest used integer label + 1
         inferred_ignore = None
-        if original_json.get("labels") and isinstance(original_json["labels"], dict):
-            int_vals = []
-            for v in original_json["labels"].values():
-                if isinstance(v, int):
-                    int_vals.append(v)
-                elif isinstance(v, (list, tuple)):
-                    for item in v:
-                        if isinstance(item, int):
-                            int_vals.append(item)
-                elif isinstance(v, dict):
-                    for item in v.values():
-                        if isinstance(item, int):
-                            int_vals.append(item)
-            max_label = max(int_vals) if int_vals else 0
-            inferred_ignore = max_label + 1
+        if "labels" in original_json:
+            inferred_ignore = self._infer_ignore_label_from_labels(original_json["labels"])
         if ignore_label is None:
             ignore_label_value = inferred_ignore if inferred_ignore is not None else 255
         else:
