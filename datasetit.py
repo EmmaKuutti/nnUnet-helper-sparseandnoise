@@ -49,6 +49,117 @@ class DatasetMaker:
             return 1
         return max(used_values) + 1
 
+    def _normalize_sparse_mode(self, mode):
+        if mode is None:
+            return "regular"
+        normalized = str(mode).strip().lower().replace(" ", "_")
+        aliases = {
+            "regular": "regular",
+            "deterministic": "regular",
+            "every_nth": "regular",
+            "random": "random_single_axis",
+            "random_single_axis": "random_single_axis",
+            "random-single-axis": "random_single_axis",
+            "random_mixed_axes": "random_mixed_axes",
+            "random-mixed-axes": "random_mixed_axes",
+            "mixed": "random_mixed_axes",
+        }
+        if normalized not in aliases:
+            raise ValueError(f"Unknown sparse mode '{mode}'. Choose from regular, random_single_axis, or random_mixed_axes.")
+        return aliases[normalized]
+
+    def _get_axis_index(self, axis):
+        axis = str(axis).lower()
+        axis_map = {"axial": 2, "coronal": 1, "sagittal": 0}
+        if axis not in axis_map:
+            raise ValueError(f"Unknown axis '{axis}'. Choose from {list(axis_map.keys())}.")
+        return axis_map[axis]
+
+    def _get_selected_slices(self, shape, axis, mode="regular", slice_step=1, coverage_percent=100.0, rng=None):
+        axis_idx = self._get_axis_index(axis) if isinstance(axis, str) else axis
+        n_slices = shape[axis_idx]
+
+        if mode == "regular":
+            if slice_step <= 0:
+                raise ValueError("slice_step must be a positive integer")
+            if slice_step == 1:
+                return list(range(n_slices))
+            return list(range(0, n_slices, slice_step))
+
+        if coverage_percent is None:
+            coverage_percent = 100.0
+        coverage_percent = float(coverage_percent)
+        if coverage_percent <= 0:
+            return []
+        if coverage_percent >= 100.0:
+            return list(range(n_slices))
+
+        target_count = int(np.ceil(n_slices * coverage_percent / 100.0))
+        if target_count >= n_slices:
+            return list(range(n_slices))
+
+        if rng is None:
+            rng = np.random.default_rng()
+        selected = rng.choice(n_slices, size=target_count, replace=False)
+        return sorted(int(v) for v in selected.tolist())
+
+    def _build_sparse_selection(self, shape, axis, secondary_axis=None, mode="regular", slice_step=1, secondary_slice_step=1, coverage_percent=100.0, rng=None):
+        mode = self._normalize_sparse_mode(mode)
+        axis_names = [axis]
+        if mode == "random_mixed_axes":
+            axis_names = ["axial", "coronal", "sagittal"]
+            if secondary_axis is not None and str(secondary_axis).lower() not in axis_names:
+                axis_names.append(str(secondary_axis).lower())
+        elif secondary_axis is not None and str(secondary_axis).lower() != str(axis).lower():
+            axis_names.append(str(secondary_axis).lower())
+
+        selection_map = {}
+        if mode == "regular":
+            for axis_name in axis_names:
+                axis_idx = self._get_axis_index(axis_name)
+                step = slice_step if axis_name == str(axis).lower() else secondary_slice_step
+                selection_map[axis_idx] = self._get_selected_slices(shape, axis_idx, mode="regular", slice_step=step, coverage_percent=coverage_percent, rng=rng)
+        elif mode == "random_single_axis":
+            axis_idx = self._get_axis_index(axis)
+            selection_map[axis_idx] = self._get_selected_slices(shape, axis_idx, mode="random_single_axis", slice_step=slice_step, coverage_percent=coverage_percent, rng=rng)
+        else:
+            candidates = []
+            for axis_name in axis_names:
+                axis_idx = self._get_axis_index(axis_name)
+                for slice_idx in range(shape[axis_idx]):
+                    candidates.append((axis_idx, slice_idx))
+
+            if not candidates:
+                return selection_map
+
+            if coverage_percent >= 100.0:
+                for axis_idx in {a for a, _ in candidates}:
+                    selection_map[axis_idx] = list(range(shape[axis_idx]))
+                return selection_map
+
+            target_count = int(np.ceil(len(candidates) * float(coverage_percent) / 100.0))
+            target_count = min(target_count, len(candidates))
+            if target_count <= 0:
+                return selection_map
+
+            if rng is None:
+                rng = np.random.default_rng()
+            chosen = rng.choice(len(candidates), size=target_count, replace=False)
+            grouped = {}
+            for pos in chosen:
+                axis_idx, slice_idx = candidates[int(pos)]
+                grouped.setdefault(axis_idx, []).append(int(slice_idx))
+            selection_map = {axis_idx: sorted(set(slice_indices)) for axis_idx, slice_indices in grouped.items()}
+
+        return selection_map
+
+    def _apply_sparse_selection(self, sparse_data, data, selection_map):
+        for axis_idx, slice_indices in selection_map.items():
+            for slice_idx in slice_indices:
+                sel = [slice(None), slice(None), slice(None)]
+                sel[axis_idx] = slice_idx
+                sparse_data[tuple(sel)] = data[tuple(sel)]
+
     def make_baseline(self, source_dataset_dir=None, raw_data_base=None, dataset_id=1, dataset_name="Baseline"):
         """Create `nnUNet_raw` under `raw_data_base`, then copy the provided
         dataset into `nnUNet_raw/Dataset001_Baseline`.
@@ -110,17 +221,23 @@ class DatasetMaker:
 
         return target_path
 
-    def make_sparse(self, source_dataset_dir=None, raw_data_base=None, slice_step=4, case_step=1, ignore_label=None, axis='axial', secondary_axis=None, secondary_slice_step=1, dataset_id=2, dataset_name=None):
-        """Create `nnUNet_raw/DatasetXXX_n...` where for every m-th case
-        we keep every n-th slice along the chosen axis. Non-selected cases are filled with ignore_label.
+    def make_sparse(self, source_dataset_dir=None, raw_data_base=None, slice_step=4, case_step=1, ignore_label=None, axis='axial', secondary_axis=None, secondary_slice_step=1, dataset_id=2, dataset_name=None, sparse_mode='regular', coverage_percent=100.0, random_seed=None):
+        """Create `nnUNet_raw/DatasetXXX_...` by keeping selected slices from one or more orientations.
+
+        The default regular mode keeps every n-th slice along the chosen axis and
+        optionally a secondary axis. Random modes instead select slices randomly
+        until a target percentage of available slices is reached.
 
         Parameters:
-        - slice_step: keep every `slice_step`-th slice (n)
+        - slice_step: keep every `slice_step`-th slice in regular mode (n)
         - case_step: process every `case_step`-th case (m)
         - ignore_label: label value used for ignored voxels
         - axis: primary axis ('axial', 'coronal', or 'sagittal')
-        - secondary_axis: optional secondary axis for combined sparsification
-        - secondary_slice_step: slice step for secondary axis (default: 1)
+        - secondary_axis: optional secondary axis for combined regular sparsification
+        - secondary_slice_step: slice step for the secondary axis in regular mode
+        - sparse_mode: 'regular', 'random_single_axis', or 'random_mixed_axes'
+        - coverage_percent: percentage of slices to keep in random modes
+        - random_seed: optional seed for reproducible random selection
         """
         source_dataset_dir = Path(source_dataset_dir or self.config.get("baseline_source"))
         raw_data_base = Path(raw_data_base or self.config.get("raw_data_base", "."))
@@ -138,18 +255,28 @@ class DatasetMaker:
             raise FileNotFoundError(f"Missing imagesTr in source dataset: {source_dataset_dir}")
 
         axis = str(axis).lower()
-        axis_map = {"axial": 2, "coronal": 1, "sagittal": 0}
-        if axis not in axis_map:
-            raise ValueError(f"Unknown axis '{axis}'. Choose from {list(axis_map.keys())}.")
-        
+        self._get_axis_index(axis)
+
         # Validate secondary axis if provided
         if secondary_axis is not None:
             secondary_axis = str(secondary_axis).lower()
-            if secondary_axis not in axis_map:
-                raise ValueError(f"Unknown secondary axis '{secondary_axis}'. Choose from {list(axis_map.keys())} or None.")
-        
+            self._get_axis_index(secondary_axis)
+
+        sparse_mode = self._normalize_sparse_mode(sparse_mode)
+        if sparse_mode != "regular" and secondary_axis is not None:
+            secondary_axis = None
+
+        if coverage_percent is None:
+            coverage_percent = 100.0
+        coverage_percent = float(coverage_percent)
+        if coverage_percent < 0.0 or coverage_percent > 100.0:
+            raise ValueError("coverage_percent must be between 0 and 100")
+
         if dataset_name is None:
-            dataset_name = f"n{slice_step}_m{case_step}_{axis}"
+            if sparse_mode == "regular":
+                dataset_name = f"n{slice_step}_m{case_step}_{axis}"
+            else:
+                dataset_name = f"p{int(round(coverage_percent))}_{sparse_mode}_{axis}"
         target_path = self._make_dataset_root(raw_data_base, dataset_id, dataset_name)
         (target_path / "imagesTr").mkdir(parents=True, exist_ok=True)
         (target_path / "labelsTr").mkdir(parents=True, exist_ok=True)
@@ -173,6 +300,7 @@ class DatasetMaker:
             ignore_label_value = inferred_ignore if inferred_ignore is not None else 255
         else:
             ignore_label_value = ignore_label
+        rng = np.random.default_rng(random_seed)
         for idx, label_file in enumerate(label_files):
             label_img = nib.load(str(label_file))
             # Use integer dtype that can hold inferred ignore label
@@ -181,21 +309,18 @@ class DatasetMaker:
             # Prepare sparse label volume filled with ignore label
             sparse_data = np.full(data.shape, int(ignore_label_value), dtype=np.int16)
 
-            # Build slicing tuple to select along the chosen axis
-            ax = axis_map[axis]
-            sel_slices = [slice(None), slice(None), slice(None)]
             if (idx % case_step) == 0:
-                sel_slices[ax] = slice(None, None, slice_step)
-                sel_slices = tuple(sel_slices)
-                sparse_data[sel_slices] = data[sel_slices]
-                
-                # Apply secondary axis slicing if provided
-                if secondary_axis is not None:
-                    secondary_ax = axis_map[secondary_axis]
-                    sel_slices_2 = [slice(None), slice(None), slice(None)]
-                    sel_slices_2[secondary_ax] = slice(None, None, secondary_slice_step)
-                    sel_slices_2 = tuple(sel_slices_2)
-                    sparse_data[sel_slices_2] = data[sel_slices_2]
+                selection_map = self._build_sparse_selection(
+                    data.shape,
+                    axis,
+                    secondary_axis=secondary_axis,
+                    mode=sparse_mode,
+                    slice_step=slice_step,
+                    secondary_slice_step=secondary_slice_step,
+                    coverage_percent=coverage_percent,
+                    rng=rng,
+                )
+                self._apply_sparse_selection(sparse_data, data, selection_map)
 
             new_img = nib.Nifti1Image(sparse_data, label_img.affine, label_img.header)
             nib.save(new_img, target_path / "labelsTr" / label_file.name)
@@ -402,7 +527,26 @@ if __name__ == "__main__":
         "--secondary-slice-step",
         type=int,
         default=1,
-        help="Slice step for secondary axis when using combined sparsification (default: 1)"
+        help="Slice step for secondary axis when using combined regular sparsification (default: 1)"
+    )
+    parser.add_argument(
+        "--sparse-mode",
+        type=str,
+        default="regular",
+        choices=["regular", "random_single_axis", "random_mixed_axes"],
+        help="Sparsification mode: regular stepping, random single-axis selection, or random mixed-axis selection"
+    )
+    parser.add_argument(
+        "--coverage-percent",
+        type=float,
+        default=100.0,
+        help="Target percentage of slices to keep in random sparsification modes (default: 100)"
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=None,
+        help="Optional seed for reproducible random slice selection"
     )
     parser.add_argument(
         "--ignore-label",
@@ -470,6 +614,9 @@ if __name__ == "__main__":
                 secondary_slice_step=set_cfg.get("secondary_slice_step", args.secondary_slice_step),
                 dataset_id=dataset_id,
                 dataset_name=dataset_name,
+                sparse_mode=set_cfg.get("sparse_mode", args.sparse_mode),
+                coverage_percent=set_cfg.get("coverage_percent", args.coverage_percent),
+                random_seed=set_cfg.get("random_seed", args.random_seed),
             )
             print(f"Created sparse dataset at: {sparse_target}")
 
@@ -500,6 +647,9 @@ if __name__ == "__main__":
             axis=args.axis,
             secondary_axis=args.secondary_axis,
             secondary_slice_step=args.secondary_slice_step,
+            sparse_mode=args.sparse_mode,
+            coverage_percent=args.coverage_percent,
+            random_seed=args.random_seed,
         )
         print(f"Created sparse dataset at: {sparse_target}")
 
