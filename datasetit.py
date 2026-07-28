@@ -293,7 +293,10 @@ class DatasetMaker:
                     original_json = {}
 
         # Infer ignore label if not provided: use the highest used integer label + 1
+        # Infer ignore label if not provided: use the highest used integer label + 1
         inferred_ignore = None
+        if "labels" in original_json:
+            inferred_ignore = self._infer_ignore_label_from_labels(original_json["labels"])
         if "labels" in original_json:
             inferred_ignore = self._infer_ignore_label_from_labels(original_json["labels"])
         if ignore_label is None:
