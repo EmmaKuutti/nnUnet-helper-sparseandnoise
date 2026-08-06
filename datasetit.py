@@ -123,6 +123,22 @@ class DatasetMaker:
             axis_idx = self._get_axis_index(axis)
             selection_map[axis_idx] = self._get_selected_slices(shape, axis_idx, mode="random_single_axis", slice_step=slice_step, coverage_percent=coverage_percent, rng=rng)
         else:
+            if rng is None:
+                rng = np.random.default_rng()
+
+            if mode == "random_mixed_axes":
+                axis_indices = [self._get_axis_index(axis_name) for axis_name in axis_names]
+                if not axis_indices:
+                    return selection_map
+                chosen_axis_idx = int(rng.choice(axis_indices))
+                n_slices = shape[chosen_axis_idx]
+                if slice_step <= 0:
+                    raise ValueError("slice_step must be a positive integer")
+                selection_map[chosen_axis_idx] = list(range(0, n_slices, slice_step))
+                if not selection_map[chosen_axis_idx]:
+                    selection_map[chosen_axis_idx] = [0]
+                return selection_map
+
             candidates = []
             for axis_name in axis_names:
                 axis_idx = self._get_axis_index(axis_name)
@@ -142,8 +158,6 @@ class DatasetMaker:
             if target_count <= 0:
                 return selection_map
 
-            if rng is None:
-                rng = np.random.default_rng()
             chosen = rng.choice(len(candidates), size=target_count, replace=False)
             grouped = {}
             for pos in chosen:
@@ -226,7 +240,9 @@ class DatasetMaker:
 
         The default regular mode keeps every n-th slice along the chosen axis and
         optionally a secondary axis. Random modes instead select slices randomly
-        until a target percentage of available slices is reached.
+        until a target percentage of available slices is reached, while the
+        mixed-axes variant chooses a single orientation at random and keeps slices
+        according to the configured slice step.
 
         Parameters:
         - slice_step: keep every `slice_step`-th slice in regular mode (n)

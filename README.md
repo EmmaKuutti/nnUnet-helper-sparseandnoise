@@ -93,6 +93,35 @@ Output from `datasetit.py`
 - Sparse sets are named `Dataset{ID}_n{n}_m{m}_{axis}` by default.
 - Noisy sets are named `Dataset{ID}_{percent}percentnoise` by default.
 
+`dataset_sparse_percentage.py` — random percentage-based slice sparsification
+===============================
+
+Usage for `dataset_sparse_percentage.py`
+- Run with Python launcher on Windows or other relevant environment:
+
+```powershell
+py -3 "dataset_sparse_percentage.py" --source "C:\path\to\source_dataset" \
+    --target-base "C:\path\to\target_base" --config "configuration_percentage.json"
+```
+
+Quick flags for `dataset_sparse_percentage.py`
+- `--keep-percent P` : percentage of slices to keep (default: 50)
+- `--axis {axial,coronal,sagittal}` : axis along which slices are randomly retained
+- `--dataset-id N` : ID for the generated dataset
+- `--dataset-name NAME` : name for the generated dataset
+- `--ignore-label N` : label value used for removed voxels
+- `--random-seed N` : optional seed for reproducible randomness
+
+Configuration (`configuration_percentage.json`) fields
+- `baseline_source`: source dataset folder containing `imagesTr`, `labelsTr`, and `dataset.json`
+- `raw_data_base`: base folder where `nnUNet_raw` will be created
+- `dataset_id`: output dataset ID
+- `dataset_name`: output dataset name
+- `keep_percent`: percentage of slices to retain
+- `axis`: axis to sparsify along
+- `ignore_label`: label value to use for removed voxels
+- `random_seed`: optional seed for reproducible random selection
+
 `results.py` — evaluation and metrics
 ===============================
 
