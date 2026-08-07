@@ -1,4 +1,7 @@
 __pycache__/*
 results_noisy_compare.py
 test_datasetit.py
+sparse_test_ksxrt5ta/*
+sparse_test_odn8mj5y/*
+test_dataset_sparse_percentage.py
 

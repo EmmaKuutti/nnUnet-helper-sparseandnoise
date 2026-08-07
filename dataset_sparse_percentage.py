@@ -12,6 +12,92 @@ from datasetit import DatasetMaker
 class PercentageSparseDatasetMaker(DatasetMaker):
     """Create a sparse dataset by randomly keeping a requested percentage of slices."""
 
+    def _get_dataset_jobs(self):
+        if not isinstance(self.config, dict):
+            return []
+
+        for key in ("sparse_sets", "datasets"):
+            datasets_cfg = self.config.get(key)
+            if isinstance(datasets_cfg, list) and datasets_cfg:
+                jobs = []
+                for entry in datasets_cfg:
+                    if not isinstance(entry, dict):
+                        continue
+                    jobs.append({
+                        "dataset_id": entry.get("dataset_id"),
+                        "dataset_name": entry.get("dataset_name"),
+                        "keep_percent": entry.get("keep_percent", entry.get("coverage_percent")),
+                        "axis": entry.get("axis", "axial"),
+                        "ignore_label": entry.get("ignore_label"),
+                        "random_seed": entry.get("random_seed"),
+                    })
+                return jobs
+
+        return [{
+            "dataset_id": self.config.get("dataset_id", 2),
+            "dataset_name": self.config.get("dataset_name"),
+            "keep_percent": self.config.get("keep_percent", 50.0),
+            "axis": self.config.get("axis", "axial"),
+            "ignore_label": self.config.get("ignore_label"),
+            "random_seed": self.config.get("random_seed"),
+        }]
+
+    def __init__(self, config_path=None):
+        super().__init__(None)
+        self.config_path = None
+        self.config_dir = Path(__file__).resolve().parent
+
+        script_dir = Path(__file__).resolve().parent
+        cwd_dir = Path.cwd()
+
+        if config_path is None:
+            default_candidates = [
+                script_dir / "configuration_percentage.json",
+                cwd_dir / "configuration_percentage.json",
+            ]
+            for candidate in default_candidates:
+                if candidate.exists():
+                    config_path = candidate
+                    break
+
+        if config_path is not None:
+            config_path = Path(str(config_path)).expanduser()
+            candidate_paths = []
+            if config_path.is_absolute():
+                candidate_paths = [config_path]
+            else:
+                candidate_paths = [
+                    (script_dir / config_path).resolve(),
+                    (cwd_dir / config_path).resolve(),
+                ]
+
+            resolved_config = None
+            for candidate in candidate_paths:
+                if candidate.exists():
+                    resolved_config = candidate
+                    break
+            if resolved_config is None:
+                resolved_config = candidate_paths[0]
+            if not resolved_config.exists():
+                raise FileNotFoundError(f"Config file not found: {resolved_config}")
+
+            self.config_path = resolved_config
+            self.config_dir = self.config_path.parent
+            with open(self.config_path, "r") as f:
+                self.config = json.load(f)
+
+    def _resolve_path(self, path, default=None):
+        if path is None:
+            path = default
+        if path is None:
+            return None
+
+        path_obj = Path(str(path)).expanduser()
+        if not path_obj.is_absolute():
+            base_dir = self.config_dir or Path.cwd()
+            path_obj = (base_dir / path_obj).resolve()
+        return path_obj
+
     def _get_selected_slices(self, shape, axis, keep_percent=100.0, rng=None):
         axis_idx = self._get_axis_index(axis) if isinstance(axis, str) else axis
         n_slices = shape[axis_idx]
@@ -52,11 +138,14 @@ class PercentageSparseDatasetMaker(DatasetMaker):
         approximately the same percentage of voxels, since each slice contributes
         the same number of voxels).
         """
-        source_dataset_dir = Path(source_dataset_dir or self.config.get("baseline_source"))
-        raw_data_base = Path(raw_data_base or self.config.get("raw_data_base", "."))
+        source_dataset_dir = self._resolve_path(source_dataset_dir or self.config.get("baseline_source"))
+        raw_data_base = self._resolve_path(raw_data_base or self.config.get("raw_data_base", "."))
 
         if not source_dataset_dir or not source_dataset_dir.exists():
-            raise FileNotFoundError(f"Source dataset folder not found: {source_dataset_dir}")
+            raise FileNotFoundError(
+                f"Source dataset folder not found: {source_dataset_dir}. "
+                f"Check baseline_source in {self.config_path or 'the supplied config file'}"
+            )
         if not source_dataset_dir.is_dir():
             raise NotADirectoryError(f"Source dataset path is not a directory: {source_dataset_dir}")
 
@@ -150,7 +239,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create a sparse dataset by randomly retaining a percentage of slices")
     parser.add_argument("--source", required=False, help="Path to the source dataset folder")
     parser.add_argument("--target-base", default=None, help="Target base folder for nnUNet_raw")
-    parser.add_argument("--config", help="Optional JSON config file")
+    parser.add_argument("--config", help="Path to the JSON config file to use")
     parser.add_argument("--keep-percent", type=float, default=None, help="Percentage of slices/voxels to keep (0-100)")
     parser.add_argument("--axis", type=str, default="axial", choices=["axial", "coronal", "sagittal"], help="Axis along which slices are randomly retained")
     parser.add_argument("--dataset-id", type=int, default=None, help="Output dataset ID")
@@ -160,28 +249,41 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    maker = PercentageSparseDatasetMaker(args.config)
-    resolved_source = args.source or maker.config.get("baseline_source")
-    resolved_target_base = args.target_base or maker.config.get("raw_data_base", ".")
+    config_path = args.config
+    if config_path is None:
+        config_path = "configuration_percentage.json"
+
+    maker = PercentageSparseDatasetMaker(config_path)
+    resolved_source = maker._resolve_path(args.source or maker.config.get("baseline_source"))
+    resolved_target_base = maker._resolve_path(args.target_base or maker.config.get("raw_data_base", "."))
 
     if not resolved_source:
         raise ValueError("Source dataset must be provided via --source or baseline_source in the config")
 
-    dataset_id = args.dataset_id if args.dataset_id is not None else maker.config.get("dataset_id", 2)
-    dataset_name = args.dataset_name if args.dataset_name is not None else maker.config.get("dataset_name")
-    keep_percent = args.keep_percent if args.keep_percent is not None else maker.config.get("keep_percent", 50.0)
-    axis = args.axis if args.axis is not None else maker.config.get("axis", "axial")
-    ignore_label = args.ignore_label if args.ignore_label is not None else maker.config.get("ignore_label")
-    random_seed = args.random_seed if args.random_seed is not None else maker.config.get("random_seed")
+    print(f"Using config file: {maker.config_path or 'no config file loaded'}")
+    print(f"Source dataset: {resolved_source}")
+    print(f"Target base: {resolved_target_base}")
 
-    target = maker.make_sparse_percentage(
-        resolved_source,
-        resolved_target_base,
-        keep_percent=keep_percent,
-        axis=axis,
-        dataset_id=dataset_id,
-        dataset_name=dataset_name,
-        ignore_label=ignore_label,
-        random_seed=random_seed,
-    )
-    print(f"Created sparse dataset at: {target}")
+    jobs = maker._get_dataset_jobs()
+    if not jobs:
+        raise ValueError("No dataset jobs were found in the config file")
+
+    for job in jobs:
+        dataset_id = args.dataset_id if args.dataset_id is not None else job.get("dataset_id")
+        dataset_name = args.dataset_name if args.dataset_name is not None else job.get("dataset_name")
+        keep_percent = args.keep_percent if args.keep_percent is not None else job.get("keep_percent", 50.0)
+        axis = args.axis if args.axis is not None else job.get("axis", "axial")
+        ignore_label = args.ignore_label if args.ignore_label is not None else job.get("ignore_label")
+        random_seed = args.random_seed if args.random_seed is not None else job.get("random_seed")
+
+        target = maker.make_sparse_percentage(
+            resolved_source,
+            resolved_target_base,
+            keep_percent=keep_percent,
+            axis=axis,
+            dataset_id=dataset_id,
+            dataset_name=dataset_name,
+            ignore_label=ignore_label,
+            random_seed=random_seed,
+        )
+        print(f"Created sparse dataset at: {target}")

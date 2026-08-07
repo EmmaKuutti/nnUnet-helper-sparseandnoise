@@ -2,8 +2,8 @@
   "baseline_source": "C:/path/to/source_dataset",
   "raw_data_base": "C:/path/to/target_base",
   "dataset_id": 2,
-  "dataset_name": "sparse_50_percent_axial",
-  "keep_percent": 50,
+  "dataset_name": "sparse_95_percent_axial",
+  "keep_percent": 95,
   "axis": "axial",
   "ignore_label": 255,
   "random_seed": 7
