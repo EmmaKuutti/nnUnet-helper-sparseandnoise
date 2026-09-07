@@ -177,9 +177,56 @@ Evaluation output from `results.py`
   - `results_histogram_hd95.png` for per-class mean and median HD95 values across datasets.
 - The histogram plots label each series with the dataset id and dataset name, and each subplot title includes the class name and class id.
 
+`friedman_test_per_class.py` — class-wise Friedman and Nemenyi significance analysis
+===============================
+
+Usage for `friedman_test_per_class.py`
+- Run the script from the project root against a CSV file with paired model results per case/class:
+
+```powershell
+py -3 "friedman_test_per_class.py"
+```
+
+- The script expects the input file `segmentation_results.csv` in the current folder by default.
+- It reads columns such as `Case_ID`, `Class`, and model result columns (for example `ModelA_Dice`, `ModelB_HD95`, etc.).
+
+What it does
+- Runs a Friedman test separately for each metric and class.
+- Uses a post-hoc Nemenyi test to compare all model pairs.
+- Prints which pairs are statistically significant at $\alpha = 0.05$.
+- For each significant pair, it also reports which model is better:
+  - for Dice, larger values are better;
+  - for HD95, smaller values are better.
+- Saves the results to an Excel workbook named `Classwise_Statistical_Results.xlsx`.
+
+Output sheets created
+- `Friedman_Overview`: summary of Friedman test statistics per metric and class.
+- `<Metric>_<Class>_Stats`: descriptive statistics and mean ranks for that class/metric.
+- `<Metric>_<Class>_Nemenyi`: full pairwise Nemenyi p-value matrix.
+- `Significant_Model_Pairs`: a compact summary with columns:
+  - `Metric`
+  - `Class`
+  - `Model A`
+  - `Model B`
+  - `p-value`
+  - `Better model`
+  - `Model A mean`
+  - `Model B mean`
+  - `Significant (a=0.05)`
+
+Example terminal output
+```text
+Dice - liver: significant model differences (alpha=0.05)
+  - ModelA vs ModelB: p = 0.0123; better = ModelA (Dice mean = 0.84)
+
+HD95 - tumor: significant model differences (alpha=0.05)
+  - ModelB vs ModelC: p = 0.0045; better = ModelB (HD95 mean = 8.12)
+```
+
 Notes
 - `datasetit.py` copies images unchanged and sparsifies or warps labels depending on the operation.
 - `results.py` pulls class names from each dataset's `dataset.json` if available, otherwise it infers classes from ground truth labels.
+- The Friedman workflow helps determine whether model differences are statistically significant and, when they are, which direction is better for each metric.
 
 Contact
 - Edit `configuration.json` to customize datasets, then run the appropriate script.
