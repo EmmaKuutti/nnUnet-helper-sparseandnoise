@@ -4,7 +4,9 @@ test_datasetit.py
 sparse_test_ksxrt5ta/*
 sparse_test_odn8mj5y/*
 test_dataset_sparse_percentage.py
-segmentation_results.csv
-table_for_friedman.py
-Classwise_Statistical_Results.xlsx
+segmentation_results/*
+table_for_friedman*
+Classwise_Statistical_Results*
+segmentation_results*
+table_inLAtex.py
 

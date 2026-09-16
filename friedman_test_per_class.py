@@ -160,4 +160,4 @@ def run_classwise_friedman(input_file, output_excel="Classwise_Statistical_Resul
 # ==========================================
 # RUN ANALYSIS
 # ==========================================
-run_classwise_friedman('segmentation_results.csv')
+run_classwise_friedman('segmentation_results_selected.csv')
