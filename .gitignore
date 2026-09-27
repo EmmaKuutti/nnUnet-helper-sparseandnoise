@@ -9,4 +9,7 @@ table_for_friedman*
 Classwise_Statistical_Results*
 segmentation_results*
 table_inLAtex.py
+Dice*
+HD95*
+tests/*
 

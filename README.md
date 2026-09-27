@@ -14,7 +14,9 @@ py -3 "datasetit.py" --source "C:\path\to\source_dataset" \
 Quick flags for `datasetit.py` (one-off runs):
 - `--make-sparse` : generate one sparse dataset
 - `--slice-step N` : keep every Nth slice in regular mode (default 4)
+- `--slice-start N` : one-based first slice eligible for sparsification (default 1)
 - `--case-step M` : process every Mth case (default 1 (all))
+- `--case-start M` : one-based first case eligible for sparsification (default 1)
 - `--axis {axial,coronal,sagittal}` : primary axis to sparsify (default axial)
 - `--secondary-axis {axial,coronal,sagittal}` : optional second axis for regular combined sparsification
 - `--secondary-slice-step N` : slice step for the secondary axis in regular mode (default 1)
@@ -28,7 +30,7 @@ Configuration (`configuration.json`) features for `datasetit.py`
 - `baseline_source`: path to source folder with `imagesTr`, `labelsTr`, `dataset.json`.
 - `raw_data_base`: base folder where `nnUNet_raw` will be created.
 - `baseline_dataset_id` / `baseline_dataset_name`: ID and name for baseline dataset.
-- `sparse_sets`: array of objects defining multiple sparse datasets. Each entry must include `dataset_id` and may include `dataset_name`, `slice_step`, `case_step`, `axis`, `secondary_axis`, `secondary_slice_step`, `ignore_label`, `sparse_mode`, `coverage_percent`, and `random_seed`. In `regular` mode, every Nth slice is selected along the chosen axes. In `random_single_axis` mode, slices are randomly chosen along the primary axis until the requested percentage is reached. In `random_mixed_axes` mode, slices are randomly chosen across axial, coronal, and sagittal orientations until the requested percentage is reached.
+- `sparse_sets`: array of objects defining multiple sparse datasets. Each entry must include `dataset_id` and may include `dataset_name`, `slice_step`, `slice_start`, `case_step`, `case_start`, `axis`, `secondary_axis`, `secondary_slice_step`, `ignore_label`, `sparse_mode`, `coverage_percent`, and `random_seed`. Start positions are one-based and default to 1, preserving the first-slice/first-case behavior. In `regular` mode, every Nth slice is selected along the chosen axes. In `random_single_axis` mode, slices are randomly chosen along the primary axis until the requested percentage is reached. In `random_mixed_axes` mode, slices are randomly chosen across axial, coronal, and sagittal orientations until the requested percentage is reached.
 - `noisy_sets`: array of objects defining multiple noisy datasets. Each entry must include `dataset_id` and may include `dataset_name`, `noise_percent`, `alpha`, `sigma`, and `ignore_label`.
 
 Example `configuration.json` for `datasetit.py`
@@ -222,6 +224,41 @@ Dice - liver: significant model differences (alpha=0.05)
 HD95 - tumor: significant model differences (alpha=0.05)
   - ModelB vs ModelC: p = 0.0045; better = ModelB (HD95 mean = 8.12)
 ```
+
+`critical_difference_diagrams.py` — Nemenyi critical-difference diagrams
+===============================
+
+Usage for `critical_difference_diagrams.py`
+- Run it after `friedman_test_per_class.py` has created the statistics workbook:
+
+```powershell
+py -3 "critical_difference_diagrams.py"
+```
+
+- By default it reads `segmentation_results_selected.csv` and
+  `Classwise_Statistical_Results.xlsx`, then writes two PNGs per metric/class to
+  `critical_difference_diagrams/`: a critical-difference diagram and a
+  `rank_distribution` violin plot showing the per-case ranks.
+- Override the inputs or output directory when using another result set:
+
+```powershell
+py -3 "critical_difference_diagrams.py" --raw segmentation_results_noisyt.csv \
+    --stats Classwise_Statistical_Results_noisyt.xlsx --output-dir diagrams_noisyt
+```
+
+  - Pool all classes into one Dice analysis and generate only the combined plots:
+
+  ```powershell
+  py -3 "critical_difference_diagrams.py" --metric Dice --combine-classes
+  ```
+
+  In combined mode, each complete class/case row is treated as one paired
+  observation, and the Friedman/Nemenyi statistics are recalculated for the
+  pooled data.
+
+The diagrams use average ranks (rank 1 is best), the Nemenyi critical difference,
+and the Friedman p-value in the title. `--alpha` controls the significance level
+used for the Nemenyi calculation.
 
 Notes
 - `datasetit.py` copies images unchanged and sparsifies or warps labels depending on the operation.
